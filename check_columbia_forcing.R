@@ -200,22 +200,22 @@ for (mm in format(seq(start.date,end.date,by="month"),"%Y%m")){
 
 
 
-# check the available cores
-#cl <- makeCluster(16, type="FORK")
+# request the available cores
+cl <- makeCluster(16, type="FORK")
 
 # export shared variables and functions
-#clusterExport(cl, c("frac", "dimList", "varList", "nhru", "convertNLDAS2NC"))
-#clusterEvalQ(cl, library(rgdal))
-#clusterEvalQ(cl, library(ncdf4))
-#clusterEvalQ(cl, library(zoo))
+clusterExport(cl, c("frac", "dimList", "varList", "nhru", "convertNLDAS2NC"))
+clusterEvalQ(cl, library(rgdal))
+clusterEvalQ(cl, library(ncdf4))
+clusterEvalQ(cl, library(zoo))
 
 
 ### excute ###
 all.date <- seq(start.date,end.date,by="day")
-#clusterMap(cl, getThisDay, this.day = all.date, .scheduling = 'dynamic')
+clusterMap(cl, getThisDay, this.day = all.date, .scheduling = 'dynamic')
 
-# getThisDay(start.date)
-#stopCluster(cl)
+# close cluster run
+stopCluster(cl)
 
 # final check if any netcdf file is missing (single thread)
 foreach(this.day=all.date) %do% {
@@ -231,8 +231,7 @@ foreach(this.day=all.date) %do% {
       convertNLDAS2NC(NLurl,NLfname,NCfname, ddiff+hh/24.0)
     }
   }
+  
   # check if every file is there
-  #print (dir(paste0(format(this.day,"%Y%m/"),format(this.day,"%Y%m%d."),"*.nc")))
- 
   if (length(dir(format(this.day,"%Y%m"),pattern=paste0(format(this.day,"%Y%m%d."),"*.nc"))) != 24) print(paste("Missing data on ",format(this.day,"%Y%m%d.")))
 }  
