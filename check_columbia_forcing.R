@@ -1,8 +1,11 @@
-#!/opt/R/bin/Rscript --vanilla
+#!/usr/bin/Rscript
+###!/opt/R/bin/Rscript --vanilla
 #setwd("/Volumes/UUI/SUMMA")
 #setwd("/Users/michaelou/OneDrive/!@postdoc/SUMMA/columbia")
 #setwd("D:/!Cloud/OneDrive/!@postdoc/SUMMA/columbia")
-setwd("/home/mgou/summaData/summa_columbia/annual_forcing")
+setwd("/home/mgou/summaProj/summaData/summa_columbia/annual_forcing")
+      #/home/mgou/summaProj/summaData/summa_columbia/annual_forcing
+#setwd("/home/mgou/summaData/summa_columbia/annual_forcing")
 library("foreign")
 library("foreach");library("doParallel")
 library("rgdal")
@@ -10,7 +13,10 @@ library("ncdf4")
 library("parallel")
 library("zoo")
 
+nproc = 4
+args <- c("2013-05-01","2013-05-01")
 args = commandArgs(trailingOnly=TRUE)
+
 if (length(args)==0) {
   stop("At least one argument must be supplied (input file).n", call.=FALSE)
 } else if (length(args)==1) {
@@ -28,7 +34,7 @@ NLDAS.nx <- 464; NLDAS.ny <- 224
 # dir()
 
 # read hru-nldas fraction dbf
-frac <- read.dbf("HRU_NLDAS.dbf")
+frac <- read.dbf("../shapefiles/HRU_NLDAS.dbf")
 # clean and filter small fractions
 frac <- frac[!(is.na(frac$hru_id2) | is.na(frac$fracArea)),]
 frac <- subset(frac, frac$fracArea > min.frac.area)
@@ -103,7 +109,8 @@ convertNLDAS2NC <- function(NLurl,NLfname,NCfname,t){
   # 11:1498286:D=2001010118:DSWRF:sfc:kpds=204,1,0:anl:"SW radiation flux downwards (surface) [W/m^2]
   
   # fill missing values
-  if (anyNA(grib$band1)) grib$band1 <- na.approx(grib$band1, rule = 2)
+  
+  if (anyNA(grib$band1)) grib$band1 <- na.approx(grib$band1, rule = 2) # it wont read band1 properly
   if (anyNA(grib$band2)) grib$band2 <- na.approx(grib$band2, rule = 2)
   if (anyNA(grib$band3)) grib$band3 <- na.approx(grib$band3, rule = 2)
   if (anyNA(grib$band4)) grib$band4 <- na.approx(grib$band4, rule = 2)
@@ -161,7 +168,7 @@ julianDay <- function(this.day) {
 }
 
 # day time
-ref.date <- as.Date("1900-01-01")
+ref.date <- as.Date("1990-01-01")
 hours <- sprintf("%02i",0:23)
 all.date <- seq(start.date,end.date,by="day")
 
@@ -173,7 +180,7 @@ all.date <- seq(start.date,end.date,by="day")
 
 # function to parse the date for a hourly loop to download NLDAS data
 getThisDay <- function(this.day){
-  ddiff <- as.numeric(this.day-as.Date("1900-01-01"))
+  ddiff <- as.numeric(this.day-as.Date("1990-01-01"))
   # Julian day
   dd <- julianDay(this.day) 
   
@@ -201,7 +208,7 @@ for (mm in format(seq(start.date,end.date,by="month"),"%Y%m")){
 
 
 # request the available cores
-cl <- makeCluster(16, type="FORK")
+cl <- makeCluster(nproc, type="FORK")
 
 # export shared variables and functions
 clusterExport(cl, c("frac", "dimList", "varList", "nhru", "convertNLDAS2NC"))
@@ -233,5 +240,5 @@ foreach(this.day=all.date) %do% {
   }
   
   # check if every file is there
-  if (length(dir(format(this.day,"%Y%m"),pattern=paste0(format(this.day,"%Y%m%d."),"*.nc"))) != 24) print(paste("Missing data on ",format(this.day,"%Y%m%d.")))
+  if (length(dir(format(this.day,"%Y%m"),pattern=paste0(format(this.day,"%Y%m%d."),"*.nc"))) != 24) print(paste("Missing data on ",format(this.day,"%Y%m%d."))) else print(paste("Finish download on ",format(this.day,"%Y%m%d.")))
 }  
