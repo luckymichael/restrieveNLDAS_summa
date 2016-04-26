@@ -3,9 +3,9 @@
 #setwd("/Volumes/UUI/SUMMA")
 #setwd("/Users/michaelou/OneDrive/!@postdoc/SUMMA/columbia")
 #setwd("D:/!Cloud/OneDrive/!@postdoc/SUMMA/columbia")
-setwd("/home/mgou/summaProj/summaData/summa_columbia/annual_forcing")
+setwd("/home/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
       #/home/mgou/summaProj/summaData/summa_columbia/annual_forcing
-#setwd("/home/mgou/summaData/summa_columbia/annual_forcing")
+#setwd("/usr/lusers/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
 library("foreign")
 library("foreach");library("doParallel")
 library("rgdal")
@@ -13,19 +13,21 @@ library("ncdf4")
 library("parallel")
 library("zoo")
 
-nproc = 4
-args <- c("2013-05-01","2013-05-01")
+
+#args <- c("2013-05-01","2013-05-01","32")
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args)==0) {
-  stop("At least one argument must be supplied (input file).n", call.=FALSE)
+  stop("Usage: columbia_forcing startDate endDate nProc", call.=FALSE)
 } else if (length(args)==1) {
-  # default output file
+  # default output file and single thread
   args[2] = args[1]
+  args[3] = "1"
 }
 # define the simulation perid
 start.date <- as.Date(args[1])
 end.date <-   as.Date(args[2])
+nproc = as.integer(args[3])
 min.frac.area <- 5000 # filter those fractions smaller than this value square meters
 
 
@@ -51,13 +53,14 @@ frac$idx <- NLDAS.nx*(NLDAS.ny-frac$NLDAS_Y) + frac$NLDAS_X
 
 # define dimensions of output netcdf
 dimList <- list(
-  dimHRU  <-ncdim_def(name="hruId", units="", vals=hru.area[,1]),
-  dimTime <- ncdim_def(name="time",  units="days since 1900-01-01", vals=0, unlim=TRUE, calendar="standard", longname="Observation time")
+  dimHRU  <-ncdim_def(name="hru", units="", vals=1:nhru),
+  dimTime <- ncdim_def(name="time",  units="days since 1990-01-01", vals=0, unlim=TRUE, calendar="standard", longname="Observation time")
 )
 
 
 # define variables of output netcdf
 varList <-list(
+  nc.HRU <- ncvar_def( name="hruID",    units="",        dim=dimHRU,  missval=-999., longname="hru ID", prec="integer"),
   nc.TMP <- ncvar_def( name="airtemp",  units="K",       dim=dimList, missval=-999., longname="Air temperature at the measurement height", prec="double"),
   nc.SPFH <- ncvar_def( name="spechum", units="kg/kg",   dim=dimList, missval=-999., longname="Specific humidity at the measurement height", prec="double"),
   nc.PRES <- ncvar_def( name="airpres", units="Pa",      dim=dimList, missval=-999., longname="Pressure at the measurement height", prec="double"),
@@ -110,7 +113,7 @@ convertNLDAS2NC <- function(NLurl,NLfname,NCfname,t){
   
   # fill missing values
   
-  if (anyNA(grib$band1)) grib$band1 <- na.approx(grib$band1, rule = 2) # it wont read band1 properly
+  if (anyNA(grib$band1)) grib$band1 <- na.approx(grib$band1, rule = 2) 
   if (anyNA(grib$band2)) grib$band2 <- na.approx(grib$band2, rule = 2)
   if (anyNA(grib$band3)) grib$band3 <- na.approx(grib$band3, rule = 2)
   if (anyNA(grib$band4)) grib$band4 <- na.approx(grib$band4, rule = 2)
@@ -120,12 +123,12 @@ convertNLDAS2NC <- function(NLurl,NLfname,NCfname,t){
   if (anyNA(grib$band11)) grib$band11 <- na.approx(grib$band11, rule = 2)
   
   # extract the variables needed for SUMMA HRUs
-  nl <- data.frame(airtemp = grib$band1[frac$idx],
+  nl <- data.frame(airtemp = grib$band1[frac$idx] + 273.15, # be CAREFUL of that rgdal read temperature in C degree, it needs to be converted K
                    spechum = grib$band2[frac$idx],
                    airpres = grib$band3[frac$idx],
                    windspd = sqrt(grib$band4[frac$idx]^2+grib$band5[frac$idx]^2),
                    LWRadAtm = grib$band6[frac$idx],
-                   pptrate = grib$band10[frac$idx]/3600.0,
+                   pptrate = grib$band10[frac$idx]/3600.0, # convert it from kg/m2 to mm/hr
                    SWRadAtm = grib$band11[frac$idx])
   
   # multiply the fraction rate of each fraction  
@@ -145,6 +148,8 @@ convertNLDAS2NC <- function(NLurl,NLfname,NCfname,t){
   # creat and write the netCDF file
   nc <- nc_create(NCfname, vars=varList)
   ncvar_put(nc,"time",t)
+  ncvar_put(nc,"hruID",hru.area[,1])
+  
   for (i in 2:8){
     ncvar_put(nc,varnames[i],hru.var[,i])
   }
@@ -211,7 +216,7 @@ for (mm in format(seq(start.date,end.date,by="month"),"%Y%m")){
 cl <- makeCluster(nproc, type="FORK")
 
 # export shared variables and functions
-clusterExport(cl, c("frac", "dimList", "varList", "nhru", "convertNLDAS2NC"))
+clusterExport(cl, c("frac", "dimList", "varList", "nhru", "convertNLDAS2NC","hru.area"))
 clusterEvalQ(cl, library(rgdal))
 clusterEvalQ(cl, library(ncdf4))
 clusterEvalQ(cl, library(zoo))
