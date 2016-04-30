@@ -1,11 +1,14 @@
 #!/sw/r-3.2.4/bin/Rscript
 ##!/usr/bin/Rscript
 ###!/opt/R/bin/Rscript --vanilla
-#setwd("/Volumes/UUI/SUMMA")
-#setwd("/Users/michaelou/OneDrive/!@postdoc/SUMMA/columbia")
-#setwd("D:/!Cloud/OneDrive/!@postdoc/SUMMA/columbia")
-#setwd("/home/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
-      #/home/mgou/summaProj/summaData/summa_columbia/annual_forcing
+
+# thinkpad laptop
+# setwd("D:/!Cloud/OneDrive/!@postdoc/SUMMA/columbia")
+
+# dell laptop
+# setwd("/home/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
+
+# hyak
 setwd("/usr/lusers/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
 library("foreign")
 library("foreach");library("doParallel")
@@ -18,7 +21,7 @@ library("zoo")
 # reference time
 ref.date <- as.Date("1990-01-01")
 
-#args <- c("2013-05-01","2013-05-01","32")
+#args <- c("2000-01-01","2000-01-01","2")
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args)==0) {
@@ -64,14 +67,15 @@ dimList <- list(
 
 # define variables of output netcdf
 varList <-list(
-  nc.HRU <- ncvar_def( name="hruID",    units="",        dim=dimHRU,  missval=-999., longname="hru ID", prec="integer"),
-  nc.TMP <- ncvar_def( name="airtemp",  units="K",       dim=dimList, missval=-999., longname="Air temperature at the measurement height", prec="double"),
-  nc.SPFH <- ncvar_def( name="spechum", units="kg/kg",   dim=dimList, missval=-999., longname="Specific humidity at the measurement height", prec="double"),
-  nc.PRES <- ncvar_def( name="airpres", units="Pa",      dim=dimList, missval=-999., longname="Pressure at the measurement height", prec="double"),
-  nc.WIND <- ncvar_def( name="windspd", units="m/s",     dim=dimList, missval=-999., longname="Wind speed at the measurement height", prec="double"),
-  nc.DLWRF <- ncvar_def(name="LWRadAtm",units="W/m^2",   dim=dimList, missval=-999., longname="Longwave radiation at the upper boundary", prec="double"),
-  nc.PCP <- ncvar_def( name="pptrate",  units="kg/m^2/s",dim=dimList, missval=-999., longname="Precipitation rate", prec="double"),
-  nc.DSWRF <- ncvar_def(name="SWRadAtm",units="W/m^2",   dim=dimList, missval=-999., longname="Short radiation at the upper boundary", prec="double")
+  nc.dstep <- ncvar_def( name="data_step",units="seconds",dim=list(),  missval=-999., longname="data step length in seconds", prec="double"),
+  nc.HRU <- ncvar_def( name="hruID",    units="",         dim=dimHRU,  missval=-999., longname="hru ID", prec="integer"),
+  nc.TMP <- ncvar_def( name="airtemp",  units="K",        dim=dimList, missval=-999., longname="Air temperature at the measurement height", prec="double"),
+  nc.SPFH <- ncvar_def( name="spechum", units="kg/kg",    dim=dimList, missval=-999., longname="Specific humidity at the measurement height", prec="double"),
+  nc.PRES <- ncvar_def( name="airpres", units="Pa",       dim=dimList, missval=-999., longname="Pressure at the measurement height", prec="double"),
+  nc.WIND <- ncvar_def( name="windspd", units="m/s",      dim=dimList, missval=-999., longname="Wind speed at the measurement height", prec="double"),
+  nc.DLWRF <- ncvar_def(name="LWRadAtm",units="W/m^2",    dim=dimList, missval=-999., longname="Longwave radiation at the upper boundary", prec="double"),
+  nc.PCP <- ncvar_def( name="pptrate",  units="kg/m^2/s", dim=dimList, missval=-999., longname="Precipitation rate", prec="double"),
+  nc.DSWRF <- ncvar_def(name="SWRadAtm",units="W/m^2",    dim=dimList, missval=-999., longname="Short radiation at the upper boundary", prec="double")
 )
 
 
@@ -138,11 +142,7 @@ convertNLDAS2NC <- function(NLfname,NCfname,t){
   # sum the fraction to hru level
   hru.var <- aggregate(nl, list(hruID <- frac$hru_id2), FUN = sum)
 
-  if (nrow(hru.var) != nhru) {
-    print(paste0("convertNLDAS2NC fails at ", NLfname))
-    stop
-  }
-  
+
   # output varaible names
   varnames <- names(hru.var)
 

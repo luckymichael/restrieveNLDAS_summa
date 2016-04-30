@@ -11,7 +11,7 @@ library("parallel")
 
 
 
-#args <- c("2013-05-01","2013-05-01","32")
+#args <- c("2013-05-01","2013-05-01","2")
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args)==0) {
@@ -86,4 +86,4 @@ clusterMap(cl, getThisDayGrib, this.day = all.date, .scheduling = 'dynamic')
 
 # close cluster run
 stopCluster(cl)
-stop("finished download grib")
+print("finished download grib")
