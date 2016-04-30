@@ -1,11 +1,12 @@
-#!/usr/bin/Rscript
+#!/sw/r-3.2.4/bin/Rscript
+##!/usr/bin/Rscript
 ###!/opt/R/bin/Rscript --vanilla
 #setwd("/Volumes/UUI/SUMMA")
 #setwd("/Users/michaelou/OneDrive/!@postdoc/SUMMA/columbia")
 #setwd("D:/!Cloud/OneDrive/!@postdoc/SUMMA/columbia")
-setwd("/home/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
+#setwd("/home/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
       #/home/mgou/summaProj/summaData/summa_columbia/annual_forcing
-#setwd("/usr/lusers/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
+setwd("/usr/lusers/mgou/uwhydro/summaProj/summaData/summa_columbia/annual_forcing")
 library("foreign")
 library("foreach");library("doParallel")
 library("rgdal")
@@ -13,6 +14,9 @@ library("ncdf4")
 library("parallel")
 library("zoo")
 
+
+# reference time
+ref.date <- as.Date("1990-01-01")
 
 #args <- c("2013-05-01","2013-05-01","32")
 args = commandArgs(trailingOnly=TRUE)
@@ -54,7 +58,7 @@ frac$idx <- NLDAS.nx*(NLDAS.ny-frac$NLDAS_Y) + frac$NLDAS_X
 # define dimensions of output netcdf
 dimList <- list(
   dimHRU  <-ncdim_def(name="hru", units="", vals=1:nhru),
-  dimTime <- ncdim_def(name="time",  units="days since 1990-01-01", vals=0, unlim=TRUE, calendar="standard", longname="Observation time")
+  dimTime <- ncdim_def(name="time",  units=paste0("days since ", format(ref.date, "%Y-%m-%d")), vals=0, unlim=TRUE, calendar="standard", longname="Observation time")
 )
 
 
@@ -74,15 +78,12 @@ varList <-list(
 
 
 
-convertNLDAS2NC <- function(NLurl,NLfname,NCfname,t){
+convertNLDAS2NC <- function(NLfname,NCfname,t){
   # this function download the NLDAS file and convert it to a NC file for HRUs
   # NLurl   -- the link of the NLDAS grib file
   # NLfname -- a string of the file name to save the NLDAS grib file on the local disk
   # NCfname -- a string of the file name of the output netCDF
   # t       -- the time since of 1900-01-01 00:00 for the variables represented in this NLDAS file
-
-  # download the NLDAS file
-  if (capabilities("libcurl")) download.file(NLurl,NLfname,quiet=FALSE,method="libcurl")  else download.file(NLurl,NLfname,quiet=FALSE)
 
   # read the grib file, alternative method  using rNOMADS package: grib <- ReadGrib(file.name = NLfname, levels = 1,variables = c("TMP2m"))
   grib <- readGDAL(NLfname)
@@ -154,28 +155,10 @@ convertNLDAS2NC <- function(NLurl,NLfname,NCfname,t){
     ncvar_put(nc,varnames[i],hru.var[,i])
   }
   nc_close(nc)
-  # delete the grib file
-  file.remove(NLfname)
   return(0)
   
 }
-  
-# calculate the Julian day of the year
-julianDay <- function(this.day) {
-   # Julian day
-  daysInMonth <- c(31,28,31,30,31,30,31,31,30,31,30,31)
-  yy <- as.integer(format(this.day,"%Y"))
-  mm <- as.integer(format(this.day,"%m"))
-  dd <- as.integer(format(this.day,"%d"))
-  if (((yy %% 4 == 0) & (yy %% 100 != 0)) | (yy %% 400 == 0)) daysInMonth[2] = 29
-  if (mm>1) dd <- dd + sum(daysInMonth[1:(mm-1)])
-  return(dd)
-}
 
-# day time
-ref.date <- as.Date("1990-01-01")
-hours <- sprintf("%02i",0:23)
-all.date <- seq(start.date,end.date,by="day")
 
 # define the url of NLDAS data (prefix) 
 # sample:     ftp://hydro1.sci.gsfc.nasa.gov/data/s4pa/NLDAS/NLDAS_FORA0125_H.002/1994/005/NLDAS_FORA0125_H.A19940105.0000.002.grb
@@ -184,24 +167,20 @@ all.date <- seq(start.date,end.date,by="day")
 
 
 # function to parse the date for a hourly loop to download NLDAS data
-getThisDay <- function(this.day){
-  ddiff <- as.numeric(this.day-as.Date("1990-01-01"))
-  # Julian day
-  dd <- julianDay(this.day) 
+convertThisDay <- function(this.day){
+  ddiff <- as.numeric(this.day-ref.date)
   
-  jday <- sprintf("%03i",dd)
   for (hh in 0:23){
     # specify the NLDAS file names NLDAS_FORA0125_H.A<YYYYMMDD>.<HH>00.002.grb
     hrs <- sprintf("%02i",hh)
-    NLfname <- paste0("NLDAS_FORA0125_H.A",format(this.day,"%Y%m%d."),    hrs,"00.002.grb")
+    NLfname <- paste0("gribs/NLDAS_FORA0125_H.A",format(this.day,"%Y%m%d."),    hrs,"00.002.grb")
     NCfname <- paste0(format(this.day,"%Y%m/"),format(this.day,"%Y%m%d."),hrs,".nc")
-    # obtain the link
-    NLurl <- paste0("ftp://hydro1.sci.gsfc.nasa.gov/data/s4pa/NLDAS/NLDAS_FORA0125_H.002/",format(this.day,"%Y"),"/",jday,"/",NLfname)
+    
     t <- ddiff+hh/24
-    convertNLDAS2NC(NLurl,NLfname,NCfname,t)
+    convertNLDAS2NC(NLfname,NCfname,t)
   }
   
-  print(paste("Finish", format(this.day,"%Y%m%d")))
+  #print(paste("Finish", format(this.day,"%Y%m%d")))
 }
 
 
@@ -224,7 +203,7 @@ clusterEvalQ(cl, library(zoo))
 
 ### excute ###
 all.date <- seq(start.date,end.date,by="day")
-clusterMap(cl, getThisDay, this.day = all.date, .scheduling = 'dynamic')
+clusterMap(cl, convertThisDay, this.day = all.date, .scheduling = 'dynamic')
 
 # close cluster run
 stopCluster(cl)
@@ -232,18 +211,19 @@ stopCluster(cl)
 # final check if any netcdf file is missing (single thread)
 foreach(this.day=all.date) %do% {
   ddiff <- as.numeric(this.day-as.Date("1900-01-01"))
-  dd <- julianDay(this.day)
   foreach(hh = 0:23) %do% {
     hrs <- sprintf("%02i",hh)
     NCfname <- paste0(format(this.day,"%Y%m/"),format(this.day,"%Y%m%d."),hrs,".nc")
     if (! file.exists(NCfname)){
       NLfname <- paste0("NLDAS_FORA0125_H.A",format(this.day,"%Y%m%d."),    hrs,"00.002.grb")
-      jday <- sprintf("%03i",dd)
-      NLurl <- paste0("ftp://hydro1.sci.gsfc.nasa.gov/data/s4pa/NLDAS/NLDAS_FORA0125_H.002/",format(this.day,"%Y"),"/",jday,"/",NLfname)
-      convertNLDAS2NC(NLurl,NLfname,NCfname, ddiff+hh/24.0)
+      convertNLDAS2NC(NLfname,NCfname, ddiff+hh/24.0)
     }
   }
   
   # check if every file is there
-  if (length(dir(format(this.day,"%Y%m"),pattern=paste0(format(this.day,"%Y%m%d."),"*.nc"))) != 24) print(paste("Missing data on ",format(this.day,"%Y%m%d."))) else print(paste("Finish download on ",format(this.day,"%Y%m%d.")))
+  if (length(dir(format(this.day,"%Y%m"),pattern=paste0(format(this.day,"%Y%m%d."),"*.nc"))) != 24){ 
+    print(paste("Missing data on ",format(this.day,"%Y%m%d.")))
+  } else {
+    print(paste("Finish download on ",format(this.day,"%Y%m%d.")))
+  }
 }  
