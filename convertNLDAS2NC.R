@@ -2,6 +2,7 @@
 ##!/usr/bin/Rscript
 ###!/opt/R/bin/Rscript --vanilla
 
+# This script generate the SUMMA forcing inputs as netCDF files. The data source is the NLDAS dataset.
 # thinkpad laptop
 # setwd("D:/!Cloud/OneDrive/!@postdoc/SUMMA/columbia")
 
@@ -17,30 +18,68 @@ library("ncdf4")
 library("parallel")
 library("zoo")
 
+down.mode <- FALSE; convert.mode <- FALSE
 
-# reference time
-ref.date <- as.Date("1990-01-01")
+# for debug args <- c("-dc","2000-01-01","2000-01-01","2")
+args <- commandArgs(trailingOnly=TRUE)
 
-#args <- c("2000-01-01","2000-01-01","2")
-args = commandArgs(trailingOnly=TRUE)
-
-if (length(args)==0) {
-  stop("Usage: columbia_forcing startDate endDate nProc", call.=FALSE)
-} else if (length(args)==1) {
+if (length(args)<=1) {
+  stop("Usage: convertNLDASNC.R [-d|-c|-dc] startDate endDate nProc", call.=FALSE)
+} else if (length(args)==2) {
   # default output file and single thread
-  args[2] = args[1]
-  args[3] = "1"
+  args[3] = args[2]
+  args[4] = "1"
 }
+if (args[1] == "-d" | args[1] == "-dc") down.mode <- TRUE
+if (args[1] == "-c" | args[1] == "-dc") convert.mode <- TRUE
+if (!(down.mode | convert.mode)) stop("Usage: convertNLDASNC.R [-d|-c|-dc] startDate endDate nProc", call.=FALSE)
+
 # define the simulation perid
-start.date <- as.Date(args[1])
-end.date <-   as.Date(args[2])
-nproc = as.integer(args[3])
+start.date <- as.Date(args[2])
+end.date <-   as.Date(args[3])
+nproc <- as.integer(args[4])
+gribdir <- "gribs"
+#### download NLDAS data ####
+
+# calculate the Julian day of the year
+julianDay <- function(this.day) {
+  # Julian day
+  daysInMonth <- c(31,28,31,30,31,30,31,31,30,31,30,31)
+  yy <- as.integer(format(this.day,"%Y"))
+  mm <- as.integer(format(this.day,"%m"))
+  dd <- as.integer(format(this.day,"%d"))
+  if (((yy %% 4 == 0) & (yy %% 100 != 0)) | (yy %% 400 == 0)) daysInMonth[2] = 29
+  if (mm>1) dd <- dd + sum(daysInMonth[1:(mm-1)])
+  return(dd)
+}
+
+# create download links of NLDAS data and download data
+getThisDayGrib <- function(this.day){
+  # Julian day
+  dd <- julianDay(this.day)   
+  jday <- sprintf("%03i",dd)  
+  #find file not exist
+  hours <- sprintf("%02i",0:23)
+  NLfname <- paste0("NLDAS_FORA0125_H.A",format(this.day,"%Y%m%d."),    hours,"00.002.grb")
+  to.down <- NLfname #[ ! file.exists(paste0("gribs/",NLfname)) ]
+  for (down in to.down) {
+    NLurl <- paste0("ftp://hydro1.sci.gsfc.nasa.gov/data/s4pa/NLDAS/NLDAS_FORA0125_H.002/",format(this.day,"%Y"),"/",jday,"/",down)
+    if (capabilities("libcurl")) {
+      if (download.file(NLurl,down,quiet=TRUE,method="libcurl") !=0 ) stop(paste("Fail to download",down))
+    }  else {
+      if (download.file(NLurl,down,quiet=TRUE) !=0 ) stop(paste("Fail to download",down))
+    }
+    # move the grib file to the folder gribs
+    file.rename(down,paste0(gribdir,"/",down))
+  }
+  #print(paste("Finish", format(this.day,"%Y%m%d")))
+}
+
+#### convert NLDAS grid to SUMMA HRUs ####
+
+ref.date <- as.Date("1990-01-01") # reference time for netcdf time unit
 min.frac.area <- 5000 # filter those fractions smaller than this value square meters
-
-
 NLDAS.nx <- 464; NLDAS.ny <- 224
-
-# dir()
 
 # read hru-nldas fraction dbf
 frac <- read.dbf("../shapefiles/HRU_NLDAS.dbf")
@@ -50,25 +89,21 @@ frac <- subset(frac, frac$fracArea > min.frac.area)
 # calculate the areal weight
 hru.area <- aggregate(frac$fracArea, list(hruID <- frac$hru_id2), FUN = sum)
 nhru <- nrow(hru.area)
-
 frac$frac <- frac$fracArea/hru.area$x[match(frac$hru_id2,hru.area[,1])]
 
-# calculate the 1D index of the cell ( from west to east then north to south !!! )
+# calculate the 1D index of the NLDAS cell ( from west to east then north to south !!! )
 frac$idx <- NLDAS.nx*(NLDAS.ny-frac$NLDAS_Y) + frac$NLDAS_X
 
-
-
-# define dimensions of output netcdf
+# define dimensions of SUMMA netcdf
 dimList <- list(
-  dimHRU  <-ncdim_def(name="hru", units="", vals=1:nhru),
-  dimTime <- ncdim_def(name="time",  units=paste0("days since ", format(ref.date, "%Y-%m-%d")), vals=0, unlim=TRUE, calendar="standard", longname="Observation time")
+  dimHRU  <- ncdim_def(name="hru",  units="",                                                  vals=1:nhru),
+  dimTime <- ncdim_def(name="time", units=paste0("days since ", format(ref.date, "%Y-%m-%d")), vals=0, unlim=TRUE, calendar="standard", longname="Observation time")
 )
 
-
-# define variables of output netcdf
+# define variables of SUMMA netcdf
 varList <-list(
   nc.dstep <- ncvar_def( name="data_step",units="seconds",dim=list(),  missval=-999., longname="data step length in seconds", prec="double"),
-  nc.HRU <- ncvar_def( name="hruID",    units="",         dim=dimHRU,  missval=-999., longname="hru ID", prec="integer"),
+  nc.HRU <- ncvar_def( name="hruId",    units="",         dim=dimHRU,  missval=-999,  longname="hru ID", prec="integer"),
   nc.TMP <- ncvar_def( name="airtemp",  units="K",        dim=dimList, missval=-999., longname="Air temperature at the measurement height", prec="double"),
   nc.SPFH <- ncvar_def( name="spechum", units="kg/kg",    dim=dimList, missval=-999., longname="Specific humidity at the measurement height", prec="double"),
   nc.PRES <- ncvar_def( name="airpres", units="Pa",       dim=dimList, missval=-999., longname="Pressure at the measurement height", prec="double"),
@@ -78,21 +113,16 @@ varList <-list(
   nc.DSWRF <- ncvar_def(name="SWRadAtm",units="W/m^2",    dim=dimList, missval=-999., longname="Short radiation at the upper boundary", prec="double")
 )
 
-
-
-
-
 convertNLDAS2NC <- function(NLfname,NCfname,t){
   # this function download the NLDAS file and convert it to a NC file for HRUs
   # NLurl   -- the link of the NLDAS grib file
   # NLfname -- a string of the file name to save the NLDAS grib file on the local disk
   # NCfname -- a string of the file name of the output netCDF
   # t       -- the time since of 1900-01-01 00:00 for the variables represented in this NLDAS file
-
+  convertNLDAS2NC = 1 # error
   # read the grib file, alternative method  using rNOMADS package: grib <- ReadGrib(file.name = NLfname, levels = 1,variables = c("TMP2m"))
   grib <- readGDAL(NLfname)
   # if want to plot use: image(grib, attr=1)
-  
   
   # NLDAS grib file strcture 
   # be careful of the dimensions of the file: from east to west (changing first) then from north to south !!!
@@ -116,7 +146,7 @@ convertNLDAS2NC <- function(NLfname,NCfname,t){
   # 10:1324326:D=2001010117:APCP:sfc:kpds=61,1,0:0-1hr acc:"Precipitation hourly total [kg/m^2]
   # 11:1498286:D=2001010118:DSWRF:sfc:kpds=204,1,0:anl:"SW radiation flux downwards (surface) [W/m^2]
   
-  # fill missing values
+  # interpolate missing values
   
   if (anyNA(grib$band1)) grib$band1 <- na.approx(grib$band1, rule = 2) 
   if (anyNA(grib$band2)) grib$band2 <- na.approx(grib$band2, rule = 2)
@@ -139,9 +169,8 @@ convertNLDAS2NC <- function(NLfname,NCfname,t){
   # multiply the fraction rate of each fraction  
   nl <- nl*frac$frac
   
-  # sum the fraction to hru level
+  # aggregate the fraction to hru level
   hru.var <- aggregate(nl, list(hruID <- frac$hru_id2), FUN = sum)
-
 
   # output varaible names
   varnames <- names(hru.var)
@@ -149,61 +178,60 @@ convertNLDAS2NC <- function(NLfname,NCfname,t){
   # creat and write the netCDF file
   nc <- nc_create(NCfname, vars=varList)
   ncvar_put(nc,"time",t)
-  ncvar_put(nc,"hruID",hru.area[,1])
+  ncvar_put(nc,"data_step",3600.)
+  ncvar_put(nc,"hruId",hru.area[,1])
   
   for (i in 2:8){
     ncvar_put(nc,varnames[i],hru.var[,i])
   }
+  
+  # close and save the SUMMA netcdf
   nc_close(nc)
   return(0)
   
 }
 
 
-# define the url of NLDAS data (prefix) 
-# sample:     ftp://hydro1.sci.gsfc.nasa.gov/data/s4pa/NLDAS/NLDAS_FORA0125_H.002/1994/005/NLDAS_FORA0125_H.A19940105.0000.002.grb
-#             ftp://hydro1.sci.gsfc.nasa.gov/data/s4pa/NLDAS/NLDAS_FORA0125_H.002/2005/001/NLDAS_FORA0125_H.A200501010000.002.grb
-#url.part1 <- "ftp://hydro1.sci.gsfc.nasa.gov/data/s4pa/NLDAS/NLDAS_FORA0125_H.002/"
-
-
-# function to parse the date for a hourly loop to download NLDAS data
+# convert the hourly NLDAS data to SUMMA netCDF input file
 convertThisDay <- function(this.day){
-  ddiff <- as.numeric(this.day-ref.date)
-  
+  ddiff <- as.numeric(this.day-ref.date)  
   for (hh in 0:23){
     # specify the NLDAS file names NLDAS_FORA0125_H.A<YYYYMMDD>.<HH>00.002.grb
     hrs <- sprintf("%02i",hh)
-    NLfname <- paste0("gribs/NLDAS_FORA0125_H.A",format(this.day,"%Y%m%d."),    hrs,"00.002.grb")
-    NCfname <- paste0(format(this.day,"%Y%m/"),format(this.day,"%Y%m%d."),hrs,".nc")
-    
+    NLfname <- paste0(gribdir,"/NLDAS_FORA0125_H.A",format(this.day,"%Y%m%d."),    hrs,"00.002.grb")
+    NCfname <- paste0(format(this.day,"%Y%m/"),format(this.day,"%Y%m%d."),hrs,".nc")    
     t <- ddiff+hh/24
-    convertNLDAS2NC(NLfname,NCfname,t)
-  }
-  
+    if (convertNLDAS2NC(NLfname,NCfname,t) != 0) stop(paste("Fail to convert",NLfname,"to",NCfname))
+  }  
   #print(paste("Finish", format(this.day,"%Y%m%d")))
 }
-
 
 # loop to create all folders
 for (mm in format(seq(start.date,end.date,by="month"),"%Y%m")){
   if (! dir.exists(mm)) dir.create(mm,recursive = TRUE)
 }
-
-
+if (! dir.exists("gribs")) dir.create("gribs",recursive = TRUE)
 
 # request the available cores
 cl <- makeCluster(nproc, type="FORK")
 
-# export shared variables and functions
-clusterExport(cl, c("frac", "dimList", "varList", "nhru", "convertNLDAS2NC","hru.area"))
-clusterEvalQ(cl, library(rgdal))
-clusterEvalQ(cl, library(ncdf4))
-clusterEvalQ(cl, library(zoo))
-
-
-### excute ###
 all.date <- seq(start.date,end.date,by="day")
-clusterMap(cl, convertThisDay, this.day = all.date, .scheduling = 'dynamic')
+
+if (down.mode) {  
+  # export shared variables and functions
+  clusterExport(cl, c("julianDay"))
+  # execute
+  clusterMap(cl, getThisDayGrib, this.day = all.date, .scheduling = 'dynamic')
+}
+if (convert.mode){
+  # export shared variables and functions
+  clusterExport(cl, c("frac", "dimList", "varList", "nhru", "convertNLDAS2NC","hru.area","ref.date"))
+  clusterEvalQ(cl, library(rgdal))
+  clusterEvalQ(cl, library(ncdf4))
+  clusterEvalQ(cl, library(zoo))  
+  ### excute ###
+  clusterMap(cl, convertThisDay, this.day = all.date, .scheduling = 'dynamic')
+}
 
 # close cluster run
 stopCluster(cl)

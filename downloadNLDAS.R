@@ -76,13 +76,12 @@ for (mm in format(seq(start.date,end.date,by="month"),"%Y%m")){
 
 # request the available cores
 cl <- makeCluster(nproc, type="FORK")
+all.date <- seq(start.date,end.date,by="day")
 
 # export shared variables and functions
 clusterExport(cl, c("julianDay"))
 
 ### excute ###
-all.date <- seq(start.date,end.date,by="day")
-clusterMap(cl, getThisDayGrib, this.day = all.date, .scheduling = 'dynamic')
 
 # close cluster run
 stopCluster(cl)
